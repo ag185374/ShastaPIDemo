@@ -4,9 +4,11 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.cloud.bigtable.beam.CloudBigtableIO;
+import com.google.cloud.bigtable.beam.CloudBigtableScanConfiguration;
 import com.google.cloud.bigtable.beam.CloudBigtableTableConfiguration;
 import org.apache.beam.runners.dataflow.options.DataflowPipelineOptions;
 import org.apache.beam.sdk.Pipeline;
+import org.apache.beam.sdk.io.Read;
 import org.apache.beam.sdk.io.gcp.pubsub.PubsubIO;
 import org.apache.beam.sdk.io.gcp.pubsub.PubsubMessage;
 import org.apache.beam.sdk.options.Default;
@@ -18,6 +20,9 @@ import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.hadoop.hbase.client.Mutation;
 import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.client.Result;
+import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.filter.FirstKeyOnlyFilter;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,11 +62,22 @@ public class DataflowToBigtable {
 
 
         // [START bigtable_beam_helloworld_write_config]
-        CloudBigtableTableConfiguration bigtableTableConfig =
-                new CloudBigtableTableConfiguration.Builder()
+//        CloudBigtableTableConfiguration bigtableTableConfig =
+//                new CloudBigtableTableConfiguration.Builder()
+//                        .withProjectId(bigtableOptions.getBigtableProjectId())
+//                        .withInstanceId(bigtableOptions.getBigtableInstanceId())
+//                        .withTableId(bigtableOptions.getBigtableTableId())
+//                        .build();
+        Scan scan = new Scan();
+        scan.setCacheBlocks(false);
+        scan.setFilter(new FirstKeyOnlyFilter());
+
+        CloudBigtableScanConfiguration bigtableTableConfig =
+                new CloudBigtableScanConfiguration.Builder()
                         .withProjectId(bigtableOptions.getBigtableProjectId())
                         .withInstanceId(bigtableOptions.getBigtableInstanceId())
                         .withTableId(bigtableOptions.getBigtableTableId())
+                        .withScan(scan)
                         .build();
         // [END bigtable_beam_helloworld_write_config]
 
@@ -71,7 +87,24 @@ public class DataflowToBigtable {
 
         //
 
+        //step 3: pull document from bt
+        pullDataFromBigTable(pipeline, bigtableTableConfig);
+
         pipeline.run().waitUntilFinish();
+    }
+
+    public static void pullDataFromBigTable(Pipeline pipeline, CloudBigtableScanConfiguration bigtableTableConfig) {
+        pipeline.apply(Read.from(CloudBigtableIO.read(bigtableTableConfig)))
+                .apply(
+                        ParDo.of(
+                                new DoFn<Result, Void>() {
+                                    @ProcessElement
+                                    public void processElement(@Element Result row, OutputReceiver<Void> out) {
+                                        System.out.println(">>>>>>>>>>>" + Bytes.toString(row.getRow()));
+                                        String s = Bytes.toString(row.getRow());
+                                    }
+                                }));
+
     }
 
     // [START bigtable_beam_helloworld_options]
@@ -96,22 +129,21 @@ public class DataflowToBigtable {
     }
 
     static class PubsubMessageToTableRow extends DoFn<PubsubMessage, Mutation> {
-
-
         @ProcessElement
         public void processElement(@Element PubsubMessage payload, OutputReceiver<Mutation> out) throws JsonMappingException, JsonProcessingException {
-            String rowKey = "Dataflow#Count#Dept#6666#UPC#000001#ItemCode#8400";
-            Put row = new Put(Bytes.toBytes(rowKey));
-            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("count"), Bytes.toBytes("20"));
-
             //pull from topic
             final Logger LOG = LoggerFactory.getLogger(PubsubMessageToTableRow.class);
             String json = new String(payload.getPayload(), StandardCharsets.UTF_8);
             ObjectMapper mapper = new ObjectMapper();
             Inventory inventory = mapper.readValue(json, Inventory.class);
-            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("count"), Bytes.toBytes(json));
+
+
+            String rowKey = "Dataflow#Count#Dept#"+inventory.documentId+"#UPC#"+inventory.UPC+"#ItemCode#"+inventory.itemCode;
+            Put row = new Put(Bytes.toBytes(rowKey));
+            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("payload"), Bytes.toBytes(json));
+            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("count"), Bytes.toBytes(inventory.count));
+            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("createdDate"), Bytes.toBytes(inventory.effectiveDate));
             out.output(row);
         }
-
     }
 }
