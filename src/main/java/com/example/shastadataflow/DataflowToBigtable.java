@@ -51,10 +51,10 @@ public class DataflowToBigtable {
                                 .fromSubscription(inputSubscription));
 
         /*
-         * Step #2: Convert Pubsub message to BigtableInventory Object
+         * Step #2: Transform the BigtableInventory into TableRows
          */
         PCollection<BigtableInventory> bigtableInventory =
-                messages.apply("ConvertMessageToBigtableInventoryObject", ParDo.of(new PusubMessageToBigtableInventory()));
+                messages.apply("ConvertBigtableInventoryToBigtableRow", ParDo.of(new PusubMessageToBigtableInventory()));
 
 
         /*
@@ -134,18 +134,18 @@ public class DataflowToBigtable {
 
     static class PusubMessageToBigtableInventory extends DoFn<PubsubMessage, BigtableInventory> {
         @ProcessElement
-        public void processElement(@Element PubsubMessage message, OutputReceiver<Inventory> out) throws JsonProcessingException {
+        public void processElement(@Element PubsubMessage message, OutputReceiver<BigtableInventory> out) throws JsonProcessingException {
             String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
             ObjectMapper mapper = new ObjectMapper();
             Inventory inventory = mapper.readValue(payload, Inventory.class);
-//            BigtableInventory bigtableInventory = new BigtableInventory(inventory, payload);
-            out.output(inventory);
+            BigtableInventory bigtableInventory = new BigtableInventory(inventory, payload);
+            out.output(bigtableInventory);
         }
     }
 
     static class BigtableInventoryToTableRow extends DoFn<BigtableInventory, Mutation> {
         @ProcessElement
-        public void processElement(@Element BigtableInventory bigtableInventory, OutputReceiver<Mutation> out) {
+        public void processElement(@Element BigtableInventory bigtableInventory, OutputReceiver<Mutation> out) throws JsonProcessingException {
             Put row = new Put(Bytes.toBytes(bigtableInventory.rowKey));
             row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("payload"), Bytes.toBytes(bigtableInventory.payload));
             row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("count"), Bytes.toBytes(bigtableInventory.inventory.count));
