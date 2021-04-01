@@ -30,20 +30,18 @@ import org.slf4j.LoggerFactory;
 import java.nio.charset.StandardCharsets;
 
 public class DataflowToBigtable {
+
     private static String inputSubscription = "projects/ret-shasta-cug01-dev/subscriptions/Shasta-PI-Inbound-sub";
 
     public static void main(String[] args) {
-        // [START bigtable_beam_create_pipeline]
-        BigtableOptions bigtableOptions = PipelineOptionsFactory.create().as(BigtableOptions.class);
-
-        PipelineOptions options = PipelineOptionsFactory.fromArgs(args).withValidation().as(PipelineOptions.class);
-        Pipeline pipeline = Pipeline.create(options);
-
-        // [END bigtable_beam_create_pipeline]
+        // [START apache_beam_create_pipeline]
+        BigtableOptions bigtableOptions = PipelineOptionsFactory.fromArgs(args).withValidation().as(BigtableOptions.class);
+        PipelineOptions pipelineOptions = PipelineOptionsFactory.fromArgs(args).withValidation().as(PipelineOptions.class);
+        Pipeline pipeline = Pipeline.create(pipelineOptions);
+        // [END apache_beam_create_pipeline]
 
         /*
-         * Step #1: Read messages in from Pub/Sub
-         * Either from a Subscription or Topic
+         * Step #1: Read messages in from Pub/Sub Subscription
          */
         PCollection<PubsubMessage> messages = null;
         messages =
@@ -52,33 +50,40 @@ public class DataflowToBigtable {
                         PubsubIO.readMessagesWithAttributes()
                                 .fromSubscription(inputSubscription));
 
+        /*
+         * Step #2: Convert Pubsub message to BigtableInventory Object
+         */
+        PCollection<BigtableInventory> bigtableInventory =
+                messages.apply("ConvertMessageToBigtableInventoryObject", ParDo.of(new PusubMessageToBigtableInventory()));
 
+
+        /*
+         * Step #3: Transform the BigtableInventory into TableRows
+         */
         PCollection<Mutation> convertedTableRows =
-                messages
-                        /*
-                         * Step #2: Transform the PubsubMessages into TableRows
-                         */
-                        .apply("ConvertMessageToBigtableRow", ParDo.of(new PubsubMessageToTableRow()));
+                bigtableInventory.apply("ConvertBigtableInventoryToBigtableRow", ParDo.of(new BigtableInventoryToTableRow()));
 
 
         // [START bigtable_beam_helloworld_write_config]
-//        CloudBigtableTableConfiguration bigtableTableConfig =
-//                new CloudBigtableTableConfiguration.Builder()
-//                        .withProjectId(bigtableOptions.getBigtableProjectId())
-//                        .withInstanceId(bigtableOptions.getBigtableInstanceId())
-//                        .withTableId(bigtableOptions.getBigtableTableId())
-//                        .build();
-        Scan scan = new Scan();
-        scan.setCacheBlocks(false);
-        scan.setFilter(new FirstKeyOnlyFilter());
-
-        CloudBigtableScanConfiguration bigtableTableConfig =
-                new CloudBigtableScanConfiguration.Builder()
+        CloudBigtableTableConfiguration bigtableTableConfig =
+                new CloudBigtableTableConfiguration.Builder()
                         .withProjectId(bigtableOptions.getBigtableProjectId())
                         .withInstanceId(bigtableOptions.getBigtableInstanceId())
                         .withTableId(bigtableOptions.getBigtableTableId())
-                        .withScan(scan)
                         .build();
+
+
+//        Scan scan = new Scan();
+//        scan.setCacheBlocks(false);
+//        scan.setFilter(new FirstKeyOnlyFilter());
+
+//        CloudBigtableScanConfiguration bigtableTableConfig =
+//                new CloudBigtableScanConfiguration.Builder()
+//                        .withProjectId(bigtableOptions.getBigtableProjectId())
+//                        .withInstanceId(bigtableOptions.getBigtableInstanceId())
+//                        .withTableId(bigtableOptions.getBigtableTableId())
+//                        .withScan(scan)
+//                        .build();
         // [END bigtable_beam_helloworld_write_config]
 
         convertedTableRows.apply(CloudBigtableIO.writeToTable(bigtableTableConfig)); //step 5: writing to bt
@@ -88,7 +93,7 @@ public class DataflowToBigtable {
         //
 
         //step 3: pull document from bt
-        pullDataFromBigTable(pipeline, bigtableTableConfig);
+//        pullDataFromBigTable(pipeline, bigtableTableConfig);
 
         pipeline.run().waitUntilFinish();
     }
@@ -107,7 +112,6 @@ public class DataflowToBigtable {
 
     }
 
-    // [START bigtable_beam_helloworld_options]
     public interface BigtableOptions extends DataflowPipelineOptions {
         @Description("The Bigtable project ID, this can be different than your Dataflow project")
         @Default.String("ret-shasta-cug01-dev")
@@ -128,21 +132,24 @@ public class DataflowToBigtable {
         void setBigtableTableId(String bigtableTableId);
     }
 
-    static class PubsubMessageToTableRow extends DoFn<PubsubMessage, Mutation> {
+    static class PusubMessageToBigtableInventory extends DoFn<PubsubMessage, BigtableInventory> {
         @ProcessElement
-        public void processElement(@Element PubsubMessage payload, OutputReceiver<Mutation> out) throws JsonMappingException, JsonProcessingException {
-            //pull from topic
-            final Logger LOG = LoggerFactory.getLogger(PubsubMessageToTableRow.class);
-            String json = new String(payload.getPayload(), StandardCharsets.UTF_8);
+        public void processElement(@Element PubsubMessage message, OutputReceiver<Inventory> out) throws JsonProcessingException {
+            String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
             ObjectMapper mapper = new ObjectMapper();
-            Inventory inventory = mapper.readValue(json, Inventory.class);
+            Inventory inventory = mapper.readValue(payload, Inventory.class);
+//            BigtableInventory bigtableInventory = new BigtableInventory(inventory, payload);
+            out.output(inventory);
+        }
+    }
 
-
-            String rowKey = "Dataflow#Count#Dept#"+inventory.documentId+"#UPC#"+inventory.UPC+"#ItemCode#"+inventory.itemCode;
-            Put row = new Put(Bytes.toBytes(rowKey));
-            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("payload"), Bytes.toBytes(json));
-            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("count"), Bytes.toBytes(inventory.count));
-            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("createdDate"), Bytes.toBytes(inventory.effectiveDate));
+    static class BigtableInventoryToTableRow extends DoFn<BigtableInventory, Mutation> {
+        @ProcessElement
+        public void processElement(@Element BigtableInventory bigtableInventory, OutputReceiver<Mutation> out) {
+            Put row = new Put(Bytes.toBytes(bigtableInventory.rowKey));
+            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("payload"), Bytes.toBytes(bigtableInventory.payload));
+            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("count"), Bytes.toBytes(bigtableInventory.inventory.count));
+            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("createdDate"), Bytes.toBytes(bigtableInventory.inventory.effectiveDate));
             out.output(row);
         }
     }
