@@ -50,7 +50,7 @@ public class DataflowToBigtable {
 
     public static void main(String[] args) throws IOException {
         // [START apache_beam_create_pipeline]
-        BigtableOptions bigtableOptions = PipelineOptionsFactory.fromArgs(args).withValidation().as(BigtableOptions.class);
+        BigtableOptions bigtableOptions = PipelineOptionsFactory.create().as(BigtableOptions.class);
         PipelineOptions pipelineOptions = PipelineOptionsFactory.fromArgs(args).withValidation().as(PipelineOptions.class);
         Pipeline pipeline = Pipeline.create(pipelineOptions);
         // [END apache_beam_create_pipeline]
@@ -101,7 +101,7 @@ public class DataflowToBigtable {
          * Step #3: Calculate the count sum for written rows
          */
         PCollection<String>  inventorySum=
-                rowKeys.apply("WriteTableRowsToBigTable", ParDo.of(new CalculateSumFromBigtable()));
+                rowKeys.apply("CalculateSumFromBigtable", ParDo.of(new CalculateSumFromBigtable()));
 
         /*
          * Step #4: Publish the message to Pubsub
