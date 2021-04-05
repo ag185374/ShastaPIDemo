@@ -11,7 +11,8 @@ public class Inventory {
     public String documentId;
     public String documentType;
     public String documentStatus;
-    public String count;
+    public String countOverride;
+    public String countAdjustment;
     public String effectiveDate;
     public String endDate;
     public double basePrice;

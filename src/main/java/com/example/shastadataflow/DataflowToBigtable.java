@@ -180,35 +180,38 @@ public class DataflowToBigtable {
             String rowKey = "Dataflow#Count#Dept#"+inventory.documentId+"#UPC#"+inventory.UPC+"#ItemCode#"+inventory.itemCode;
 
             Filters.Filter filter = Filters.FILTERS.limit().cellsPerColumn(1);
-
-            Row btRow = dataClient.readRow(tableId, rowKey,filter);
             System.out.println("rowKey ******************** " + rowKey);
-            int totalCount = Integer.parseInt(inventory.count);
-            if (btRow != null){
-                List<RowCell> cell  = btRow.getCells("cf-meta","totalCount");
-                if (cell.size() != 0){
-                    totalCount += Integer.parseInt(cell.get(0).getValue().toStringUtf8());
-                    System.out.println("timeStamp ******************** " + cell.get(0).getTimestamp());
+            int totalCount = 0;
+            RowMutation rowMutation = RowMutation.create(tableId, rowKey);
+            if (inventory.countOverride != null){
+                totalCount = Integer.parseInt(inventory.countOverride);
+                rowMutation.setCell("cf-meta", "count#override", String.valueOf(totalCount));
+            }
+            else{
+                Row btRow = dataClient.readRow(tableId, rowKey,filter);
+                if (btRow != null){
+                    List<RowCell> cell  = btRow.getCells("cf-meta","BOH");
+                    if (cell.size() != 0){
+                        totalCount = Integer.parseInt(cell.get(0).getValue().toStringUtf8());
+                        System.out.println("timeStamp ******************** " + cell.get(0).getTimestamp());
+                    }
                 }
             }
-            RowMutation rowMutation =
-                    RowMutation.create(tableId, rowKey)
-                            .setCell("cf-meta", "count",inventory.count)
-                            .setCell("cf-meta","totalCount",String.valueOf(totalCount))
-                            .setCell("cf-meta", "payload", payload)
-                            .setCell("cf-meta", "createdDate", inventory.effectiveDate);
+
+            if (inventory.countAdjustment != null){
+                totalCount += Integer.parseInt(inventory.countAdjustment);
+                rowMutation.setCell("cf-meta", "count#adjustment",String.valueOf(inventory.countAdjustment));
+            }
+            rowMutation
+                .setCell("cf-meta","BOH",String.valueOf(totalCount))
+                .setCell("cf-meta", "payload", payload)
+                .setCell("cf-meta", "createdDate", inventory.effectiveDate);
             dataClient.mutateRow(rowMutation);
 
             // Construct pubsub message
             InventorySum inventorySum = new InventorySum(inventory.itemCode,inventory.UPC,inventory.documentId,String.valueOf(totalCount));
             String json = mapper.writeValueAsString(inventorySum);
             out.output(json);
-
-            // Use Bigtable IO connector
-//            Put row = new Put(Bytes.toBytes(rowKey));
-//            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("payload"), Bytes.toBytes(payload));
-//            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("count"), Bytes.toBytes(inventory.count));
-//            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("createdDate"), Bytes.toBytes(inventory.effectiveDate));
         }
     }
 
