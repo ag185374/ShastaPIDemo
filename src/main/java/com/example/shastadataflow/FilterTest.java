@@ -41,9 +41,10 @@ public class FilterTest {
         adminClient = BigtableTableAdminClient.create(adminSettings);
 
         // Get date epoch
-        String start = "05/04/2021";
-        String end = "06/04/2021";
-        SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy");
+        String start = "2021/04/05";
+        String end = "2021/04/06";
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd");
+        SimpleDateFormat outputSdf = new SimpleDateFormat("yyyy/MM/dd:HH:mm:ss:SSS");
         Date startDate = sdf.parse(start);
         Date endDate = sdf.parse(end);
         long startEpoch = startDate.getTime() * 1000;
@@ -58,7 +59,8 @@ public class FilterTest {
         if (btRow != null){
             List<RowCell> cell  = btRow.getCells("cf-meta","BOH");
             if (cell.size()!= 0){
-
+                System.out.println("timeStamp -----------> " + outputSdf.format(new Date(cell.get(0).getTimestamp()/1000)));
+                System.out.println("BOH -----------------> " + cell.get(0).getValue().toStringUtf8());
             }
         }
     }
