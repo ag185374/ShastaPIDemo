@@ -93,37 +93,23 @@ public class DataflowToBigtable {
                                 .fromSubscription(inputSubscription));
 
         /*
-         * Step #2: Write Pubsub messages and total count into bigtable
+         * Step #2: Parse Pubsub messages and read total count from bigtable
          */
-        PCollection<String> inventorySum =
-                messages.apply("WritePubsubToBigtable", ParDo.of(new PubsubToBigtable()));
+        PCollection<InventoryRow> inventoryRows =
+                messages.apply("ReadFromBigtable", ParDo.of(new ReadFromBigtable()));
 
-//        /*
-//         * Step #3: Calculate the count sum for written rows
-//         */
-//        PCollection<String>  inventorySum=
-//                rowKeys.apply("CalculateSumFromBigtable", ParDo.of(new CalculateSumFromBigtable()));
+        /*
+         * Step #3: Calculate the count sum for written rows
+         */
+        PCollection<String>  writtenInventory=
+                inventoryRows.apply("WriteToBigtable", ParDo.of(new WriteToBigtable()));
 
         /*
          * Step #4: Publish the message to Pubsub
          */
-        inventorySum.apply("Write PubSub Events", PubsubIO.writeStrings().to(outputTopic));
+        writtenInventory.apply("Write PubSub Events", PubsubIO.writeStrings().to(outputTopic));
 
         pipeline.run();
-    }
-
-    public static void pullDataFromBigTable(Pipeline pipeline, CloudBigtableScanConfiguration bigtableTableConfig) {
-        pipeline.apply(Read.from(CloudBigtableIO.read(bigtableTableConfig)))
-                .apply(
-                        ParDo.of(
-                                new DoFn<Result, Void>() {
-                                    @ProcessElement
-                                    public void processElement(@Element Result row, OutputReceiver<Void> out) {
-                                        System.out.println(">>>>>>>>>>>" + Bytes.toString(row.getRow()));
-                                        String s = Bytes.toString(row.getRow());
-                                    }
-                                }));
-
     }
 
 //    public interface BigtableOptions extends DataflowPipelineOptions {
@@ -146,7 +132,7 @@ public class DataflowToBigtable {
 //        void setBigtableTableId(String bigtableTableId);
 //    }
 
-    static class PubsubToBigtable extends DoFn<PubsubMessage, String> {
+    static class ReadFromBigtable extends DoFn<PubsubMessage, InventoryRow> {
         private static BigtableDataClient dataClient;
         private static BigtableTableAdminClient adminClient;
         private static String tableId = "pi-dataflow-inventory";
@@ -173,7 +159,7 @@ public class DataflowToBigtable {
         }
 
         @ProcessElement
-        public void processElement(@Element PubsubMessage message, OutputReceiver<String> out) throws JsonProcessingException {
+        public void processElement(@Element PubsubMessage message, OutputReceiver<InventoryRow> out) throws JsonProcessingException {
             String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
             ObjectMapper mapper = new ObjectMapper();
             Inventory inventory = mapper.readValue(payload, Inventory.class);
@@ -191,29 +177,14 @@ public class DataflowToBigtable {
                     System.out.println("timeStamp ******************** " + cell.get(0).getTimestamp());
                 }
             }
-            RowMutation rowMutation =
-                    RowMutation.create(tableId, rowKey)
-                            .setCell("cf-meta", "count",inventory.count)
-                            .setCell("cf-meta","totalCount",String.valueOf(totalCount))
-                            .setCell("cf-meta", "payload", payload)
-                            .setCell("cf-meta", "createdDate", inventory.effectiveDate);
-            dataClient.mutateRow(rowMutation);
-
-            // Construct pubsub message
-            InventorySum inventorySum = new InventorySum(inventory.itemCode,inventory.UPC,inventory.documentId,String.valueOf(totalCount));
-            String json = mapper.writeValueAsString(inventorySum);
-            out.output(json);
-
-            // Use Bigtable IO connector
-//            Put row = new Put(Bytes.toBytes(rowKey));
-//            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("payload"), Bytes.toBytes(payload));
-//            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("count"), Bytes.toBytes(inventory.count));
-//            row.addColumn(Bytes.toBytes("cf-meta"),Bytes.toBytes("createdDate"), Bytes.toBytes(inventory.effectiveDate));
+            InventoryRow invRow = new InventoryRow(rowKey,totalCount,inventory,payload);
+            out.output(invRow);
         }
+
     }
 
 
-    static class ReadSumFromBigtable extends DoFn<String, String> {
+    static class WriteToBigtable extends DoFn<InventoryRow, String> {
         private static BigtableDataClient dataClient;
         private static BigtableTableAdminClient adminClient;
         private static String tableId = "pi-dataflow-inventory";
@@ -240,19 +211,23 @@ public class DataflowToBigtable {
         }
 
         @ProcessElement
-        public void processElement(@Element String rowKey, OutputReceiver<String> out) throws JsonProcessingException {
-            Row btRow = dataClient.readRow(tableId, rowKey);
-            System.out.println("rowKey ******************** " + rowKey);
+        public void processElement(@Element InventoryRow invRow, OutputReceiver<String> out) throws JsonProcessingException {
+            // Write to bigtable
+            RowMutation rowMutation =
+                    RowMutation.create(tableId, invRow.rowKey)
+                            .setCell("cf-meta", "count",invRow.inventory.count)
+                            .setCell("cf-meta","totalCount",String.valueOf(invRow.totalCount))
+                            .setCell("cf-meta", "payload", invRow.payload)
+                            .setCell("cf-meta", "createdDate", invRow.inventory.effectiveDate);
+            dataClient.mutateRow(rowMutation);
 
-            String[] itemKeys = rowKey.split("#");
-            String documentId = itemKeys[3];
-            String UPC = itemKeys[5];
-            String itemCode = itemKeys[7];
-            InventorySum inventorySum = new InventorySum(itemCode,UPC,documentId,String.valueOf(1));
+            // Construct pubsub message
+            InventorySum inventorySum = new InventorySum(invRow.inventory.itemCode,invRow.inventory.UPC,invRow.inventory.documentId,String.valueOf(invRow.totalCount));
             ObjectMapper mapper = new ObjectMapper();
             String json = mapper.writeValueAsString(inventorySum);
             out.output(json);
         }
+
     }
 
 }
