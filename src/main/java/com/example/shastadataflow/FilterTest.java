@@ -11,8 +11,6 @@ import com.google.bigtable.repackaged.com.google.cloud.bigtable.data.v2.models.R
 import java.io.IOException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
 

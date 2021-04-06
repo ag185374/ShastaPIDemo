@@ -177,7 +177,7 @@ public class DataflowToBigtable {
             String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
             ObjectMapper mapper = new ObjectMapper();
             Inventory inventory = mapper.readValue(payload, Inventory.class);
-            String rowKey = "Dataflow#Count#Dept#"+inventory.documentId+"#UPC#"+inventory.UPC+"#ItemCode#"+inventory.itemCode;
+            String rowKey = "dataflow#count#retail#"+inventory.retail+"#store#"+inventory.store+"#upc#"+inventory.UPC+"#ItemCode#"+inventory.itemCode;
 
             Filters.Filter filter = Filters.FILTERS.limit().cellsPerColumn(1);
             System.out.println("rowKey ******************** " + rowKey);
@@ -198,9 +198,9 @@ public class DataflowToBigtable {
                 }
             }
 
-            if (inventory.countAdjustment != null){
-                totalCount += Integer.parseInt(inventory.countAdjustment);
-                rowMutation.setCell("cf-meta", "count#adjustment",String.valueOf(inventory.countAdjustment));
+            if (inventory.adjustment != null){
+                totalCount += Integer.parseInt(inventory.adjustment);
+                rowMutation.setCell("cf-meta", "adjustment",String.valueOf(inventory.adjustment));
             }
             rowMutation
                 .setCell("cf-meta","BOH",String.valueOf(totalCount))
