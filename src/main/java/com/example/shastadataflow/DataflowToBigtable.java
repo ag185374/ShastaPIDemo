@@ -173,45 +173,50 @@ public class DataflowToBigtable {
         }
 
         @ProcessElement
-        public void processElement(@Element PubsubMessage message, OutputReceiver<String> out) throws JsonProcessingException {
+        public void processElement(@Element PubsubMessage message, OutputReceiver<String> out){
             String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
             ObjectMapper mapper = new ObjectMapper();
-            Inventory inventory = mapper.readValue(payload, Inventory.class);
-            String rowKey = "dataflow#count#retail#"+inventory.retail+"#store#"+inventory.store+"#upc#"+inventory.UPC+"#ItemCode#"+inventory.itemCode;
-
-            Filters.Filter filter = Filters.FILTERS.limit().cellsPerColumn(1);
-            System.out.println("rowKey ******************** " + rowKey);
-            int totalCount = 0;
-            RowMutation rowMutation = RowMutation.create(tableId, rowKey);
-            if (inventory.countOverride != null){
-                totalCount = Integer.parseInt(inventory.countOverride);
-                rowMutation.setCell("cf-meta", "count#override", String.valueOf(totalCount));
-            }
-            else{
-                Row btRow = dataClient.readRow(tableId, rowKey,filter);
-                if (btRow != null){
-                    List<RowCell> cell  = btRow.getCells("cf-meta","BOH");
-                    if (cell.size() != 0){
-                        totalCount = Integer.parseInt(cell.get(0).getValue().toStringUtf8());
-                        System.out.println("timeStamp ******************** " + cell.get(0).getTimestamp());
+            Inventory inventory = null;
+            try {
+                inventory = mapper.readValue(payload, Inventory.class);
+                String rowKey = "dataflow#count#retail#" + inventory.retail + "#store#" + inventory.store + "#upc#" + inventory.UPC + "#ItemCode#" + inventory.itemCode;
+                Filters.Filter filter = Filters.FILTERS.limit().cellsPerColumn(1);
+                System.out.println("rowKey ******************** " + rowKey);
+                int totalCount = 0;
+                RowMutation rowMutation = RowMutation.create(tableId, rowKey);
+                if (inventory.countOverride != null) {
+                    totalCount = Integer.parseInt(inventory.countOverride);
+                    rowMutation.setCell("cf-meta", "count#override", String.valueOf(totalCount));
+                } else {
+                    Row btRow = dataClient.readRow(tableId, rowKey, filter);
+                    if (btRow != null) {
+                        List<RowCell> cell = btRow.getCells("cf-meta", "BOH");
+                        if (cell.size() != 0) {
+                            totalCount = Integer.parseInt(cell.get(0).getValue().toStringUtf8());
+                            System.out.println("timeStamp ******************** " + cell.get(0).getTimestamp());
+                        }
                     }
                 }
-            }
 
-            if (inventory.adjustment != null){
-                totalCount += Integer.parseInt(inventory.adjustment);
-                rowMutation.setCell("cf-meta", "adjustment",String.valueOf(inventory.adjustment));
-            }
-            rowMutation
-                .setCell("cf-meta","BOH",String.valueOf(totalCount))
-                .setCell("cf-meta", "payload", payload)
-                .setCell("cf-meta", "createdDate", inventory.effectiveDate);
-            dataClient.mutateRow(rowMutation);
+                if (inventory.adjustment != null) {
+                    totalCount += Integer.parseInt(inventory.adjustment);
+                    rowMutation.setCell("cf-meta", "adjustment", String.valueOf(inventory.adjustment));
+                }
+                rowMutation
+                        .setCell("cf-meta", "BOH", String.valueOf(totalCount))
+                        .setCell("cf-meta", "payload", payload)
+                        .setCell("cf-meta", "createdDate", inventory.effectiveDate);
+                dataClient.mutateRow(rowMutation);
 
-            // Construct pubsub message
-            InventorySum inventorySum = new InventorySum(inventory.itemCode,inventory.UPC,inventory.documentId,String.valueOf(totalCount));
-            String json = mapper.writeValueAsString(inventorySum);
-            out.output(json);
+                // Construct pubsub message
+                InventorySum inventorySum = new InventorySum(inventory.itemCode, inventory.UPC, inventory.documentId, String.valueOf(totalCount));
+                String json = null;
+                json = mapper.writeValueAsString(inventorySum);
+                out.output(json);
+            } catch (JsonProcessingException e) {
+                System.out.print("failed when parsing json object: " + payload);
+                out.output("failure");
+            }
         }
     }
 
