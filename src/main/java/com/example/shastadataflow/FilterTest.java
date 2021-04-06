@@ -11,6 +11,8 @@ import com.google.bigtable.repackaged.com.google.cloud.bigtable.data.v2.models.R
 import java.io.IOException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
 
@@ -39,20 +41,24 @@ public class FilterTest {
         adminClient = BigtableTableAdminClient.create(adminSettings);
 
         // Get date epoch
-        String start = "2021/04/05";
-        String end = "2021/04/06";
+        String start = "2021/04/06";
+        String end = "2021/04/07";
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd");
         SimpleDateFormat outputSdf = new SimpleDateFormat("yyyy/MM/dd:HH:mm:ss:SSS");
         Date startDate = sdf.parse(start);
         Date endDate = sdf.parse(end);
-        long startEpoch = startDate.getTime() * 1000;
-        long endEpoch = endDate.getTime() * 1000;
+        long startEpoch = startDate.getTime() * 1000L;
+        long endEpoch = endDate.getTime() * 1000L;
+        long timestamp = Instant.now().minus(1, ChronoUnit.HOURS).toEpochMilli() * 1000;
 
         Filters.Filter timeFilter = Filters.FILTERS.chain()
-                                            .filter(Filters.FILTERS.timestamp().range().startOpen(startEpoch).endClosed(endEpoch))
+                                            .filter(Filters.FILTERS.timestamp().range().startClosed(startEpoch).endClosed(endEpoch))
                                             .filter(Filters.FILTERS.limit().cellsPerColumn(1));
 
-        String rowKey = "Dataflow#Count#Dept##UPC#40231000#ItemCode#1111111";
+        Filters.Filter filter2 = Filters.FILTERS.timestamp().range().startClosed(0L).endClosed(timestamp);
+
+
+        String rowKey = "dataflow#count#retail#9898#store#9898#upc#9898#ItemCode#9898";
         Row btRow = dataClient.readRow(tableId, rowKey,timeFilter);
         if (btRow != null){
             List<RowCell> cell  = btRow.getCells("cf-meta","BOH");
