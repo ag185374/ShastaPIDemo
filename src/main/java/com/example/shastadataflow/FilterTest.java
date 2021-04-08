@@ -52,7 +52,7 @@ public class FilterTest {
         long timestamp = Instant.now().minus(1, ChronoUnit.HOURS).toEpochMilli() * 1000;
 
         Filters.Filter timeFilter = Filters.FILTERS.chain()
-                                            .filter(Filters.FILTERS.timestamp().range().startClosed(startEpoch).endClosed(endEpoch))
+                                            .filter(Filters.FILTERS.timestamp().range().startClosed(startEpoch).endOpen(endEpoch))
                                             .filter(Filters.FILTERS.limit().cellsPerColumn(1));
 
         Filters.Filter filter2 = Filters.FILTERS.timestamp().range().startClosed(0L).endClosed(timestamp);
