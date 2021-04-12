@@ -50,6 +50,11 @@
 			<artifactId>beam-sdks-java-extensions-google-cloud-platform-core</artifactId>
 			<version>2.28.0</version>
 		</dependency>
+		<dependency>
+			<groupId>org.apache.beam</groupId>
+			<artifactId>beam-sdks-java-extensions-sorter</artifactId>
+			<version>2.28.0</version>
+		</dependency>
 
 
 
@@ -70,6 +75,7 @@
 			<artifactId>beam-sdks-java-core</artifactId>
 			<version>2.28.0</version>
 		</dependency>
+
 
 
 
