@@ -160,6 +160,8 @@ public class DataflowToBigtable {
         @ProcessElement
         public void processElement(@Element BigtableFailedDoc failedDoc,  OutputReceiver<RowMutation> out) {
 
+
+
             RowMutation rowMutation = RowMutation.create(tableId, failedDoc.getRowKey());
             rowMutation
                     .setCell("cf-meta", "payload", failedDoc.getPayload())
@@ -240,7 +242,8 @@ public class DataflowToBigtable {
             for (KV<String, BigtableInventory> message : messages) {
                 BigtableInventory bigtableInventory = message.getValue();
                 Inventory inventory = bigtableInventory.getInventory();
-                long reversedTimeStamp = Long.MAX_VALUE - Long.parseLong(message.getKey());
+                long timestamp = Long.parseLong(message.getKey());
+                long reversedTimeStamp = Long.MAX_VALUE - timestamp;
                 String rowkeyStamped = rowKey + "#" + reversedTimeStamp;
                 Filters.Filter filter = Filters.FILTERS.limit().cellsPerColumn(1);
                 RowMutation rowMutation = RowMutation.create(tableId, rowkeyStamped);
@@ -278,7 +281,9 @@ public class DataflowToBigtable {
                     out.get(PUBSUB_OUT).output(json);
                 } catch (JsonProcessingException e) {
                     BigtableFailedDoc failedDocuments = new BigtableFailedDoc();
-                    failedDocuments.setRowKey("PI#dataflow#ERROR#ApplicationError#" + reversedTimeStamp);
+//                    failedDocuments.setRowKey("PI#dataflow#ERROR#ApplicationError#" + reversedTimeStamp);
+                    failedDocuments.setTimestamp(timestamp);
+                    failedDocuments.setErrorType("ApplicationError");
                     failedDocuments.setErroredRowKey(rowkeyStamped);
                     failedDocuments.setPayload(bigtableInventory.getPayload());
                     failedDocuments.setErrorMessage(e.getMessage());
@@ -305,9 +310,10 @@ public class DataflowToBigtable {
                 System.out.println("rowKey ******************** " + rowKey);
                 out.get(TRANSFORM_OUT).output(KV.of(rowKey, KV.of(String.valueOf(timestamp.getMillis()), bigtableInventory)));
             } catch (JsonProcessingException e) {
-                long reversedTimeStamp = Long.MAX_VALUE - timestamp.getMillis();
                 BigtableFailedDoc failedDocuments = new BigtableFailedDoc();
-                failedDocuments.setRowKey("PI#dataflow#ERROR#InputRequestError#" + reversedTimeStamp);
+//                failedDocuments.setRowKey("PI#dataflow#ERROR#InputRequestError#" + reversedTimeStamp);
+                failedDocuments.setTimestamp(timestamp.getMillis());
+                failedDocuments.setErrorType("InputRequestError");
                 failedDocuments.setPayload(payload);
                 failedDocuments.setErrorMessage(e.getMessage());
                 failedDocuments.setStacktrace(Throwables.getStackTraceAsString(e));

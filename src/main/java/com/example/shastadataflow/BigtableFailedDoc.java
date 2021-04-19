@@ -6,13 +6,29 @@ import org.apache.beam.sdk.coders.DefaultCoder;
 
 @DefaultCoder(AvroCoder.class)
 public class BigtableFailedDoc {
-    private String rowKey;
-    @Nullable private  String erroredRowKey;
+    private long timestamp;
     private String payload;
+    private String errorType;
+    @Nullable private String erroredRowKey;
     @Nullable private String errorMessage;
     @Nullable private String stacktrace;
 
-    public String getRowKey(){return rowKey;};
+    public long getTimestamp() {
+        return timestamp;
+    }
+
+    public void setTimestamp(long timestamp) {
+        this.timestamp = timestamp;
+    }
+
+    public String getErrorType() {
+        return errorType;
+    }
+
+    public void setErrorType(String errorType) {
+        this.errorType = errorType;
+    }
+
 
     public String getPayload() {
         return payload;
@@ -34,11 +50,6 @@ public class BigtableFailedDoc {
         this.erroredRowKey = erroredRowKey;
     }
 
-    public BigtableFailedDoc setRowKey(String rowKey) {
-        this.rowKey = rowKey;
-        return this;
-    }
-
     public BigtableFailedDoc setPayload(String payload) {
         this.payload = payload;
         return this;
@@ -52,5 +63,11 @@ public class BigtableFailedDoc {
     public BigtableFailedDoc setStacktrace(String stacktrace) {
         this.stacktrace = stacktrace;
         return this;
+    }
+
+    public String getRowKey(){
+        long reversedTimeStamp = Long.MAX_VALUE - this.timestamp;
+        String rowKey = "PI#dataflow#ERROR#" + errorType + "#" + reversedTimeStamp;
+        return rowKey;
     }
 }

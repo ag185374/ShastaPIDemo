@@ -39,4 +39,5 @@ public class FailedDocuments {
         this.stacktrace = stacktrace;
         return this;
     }
+
 }
