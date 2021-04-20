@@ -6,7 +6,7 @@ import org.apache.beam.sdk.coders.DefaultCoder;
 
 @DefaultCoder(AvroCoder.class)
 public class BigtableFailedDoc {
-    private long timestamp;
+    private long timestamp; // the timestamp of when the record was received through Pubsub
     private String payload;
     private String errorType;
     @Nullable private String erroredRowKey;

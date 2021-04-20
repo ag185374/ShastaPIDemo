@@ -2,15 +2,14 @@ package com.example.shastadataflow;
 
 import avro.shaded.com.google.common.base.Throwables;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.bigtable.repackaged.com.google.api.gax.rpc.ServerStream;
-import com.google.bigtable.repackaged.com.google.cloud.bigtable.admin.v2.BigtableTableAdminClient;
-import com.google.bigtable.repackaged.com.google.cloud.bigtable.admin.v2.BigtableTableAdminSettings;
-import com.google.bigtable.repackaged.com.google.cloud.bigtable.data.v2.BigtableDataClient;
-import com.google.bigtable.repackaged.com.google.cloud.bigtable.data.v2.BigtableDataSettings;
-import com.google.bigtable.repackaged.com.google.cloud.bigtable.data.v2.models.*;
-import com.google.bigtable.repackaged.com.google.cloud.bigtable.data.v2.models.Row;
+import com.google.api.gax.rpc.ServerStream;
+import com.google.cloud.bigtable.admin.v2.BigtableTableAdminClient;
+import com.google.cloud.bigtable.admin.v2.BigtableTableAdminSettings;
+import com.google.cloud.bigtable.data.v2.BigtableDataClient;
+import com.google.cloud.bigtable.data.v2.BigtableDataSettings;
+import com.google.cloud.bigtable.data.v2.models.*;
+import com.google.cloud.bigtable.data.v2.models.Row;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.extensions.sorter.BufferedExternalSorter;
 import org.apache.beam.sdk.extensions.sorter.SortValues;
@@ -30,7 +29,10 @@ import org.joda.time.Instant;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 public class DataflowToBigtable {
 
@@ -92,7 +94,7 @@ public class DataflowToBigtable {
         PCollection<KV<String, Iterable<KV<String, BigtableInventory>>>> groupedAndSorted =
                 keyedPubsubMessage
                         .get(TRANSFORM_OUT)
-                        .apply("GroupAndSortPubsubMessage", new GroupAndSortPubsubMessage());
+                        .apply("GroupPubsubMessage", new GroupPubsubMessage());
 
 
 
@@ -130,26 +132,24 @@ public class DataflowToBigtable {
         pipeline.run();
     }
 
-    public static class GroupAndSortPubsubMessage extends PTransform<PCollection<KV<String, KV<String, BigtableInventory>>>, PCollection<KV<String, Iterable<KV<String, BigtableInventory>>>>> {
+    public static class GroupPubsubMessage extends PTransform<PCollection<KV<String, KV<String, BigtableInventory>>>, PCollection<KV<String, Iterable<KV<String, BigtableInventory>>>>> {
         @Override
         public PCollection<KV<String, Iterable<KV<String, BigtableInventory>>>> expand(PCollection<KV<String, KV<String, BigtableInventory>>> input) {
+            // TODO: Do not need to sort according to effectiveDate, will change once we have finalized schema
             return input
-                    .apply(GroupByKey.<String, KV<String, BigtableInventory>>create())
-                    .apply(SortValues.<String, String, BigtableInventory>create(BufferedExternalSorter.options()));
+                    .apply(GroupByKey.<String, KV<String, BigtableInventory>>create());
+//                    .apply(SortValues.<String, String, BigtableInventory>create(BufferedExternalSorter.options()));
         }
     }
 
 
-        public static class WriteFailedPubsubMessage extends PTransform<PCollection<BigtableFailedDoc>, PDone> {
-
-
+    public static class WriteFailedPubsubMessage extends PTransform<PCollection<BigtableFailedDoc>, PDone> {
         @Override
         public PDone expand(PCollection<BigtableFailedDoc> failedRecords) {
            failedRecords
                     .apply("FailedRecordToBigTableRow", ParDo.of(new FailedPubsubMessageToBigTableRowFn()))
                     .apply("WriteTableRow", ParDo.of(new WriteTableRowFn()));
            return PDone.in(failedRecords.getPipeline());
-
         }
     }
 
@@ -159,9 +159,6 @@ public class DataflowToBigtable {
 
         @ProcessElement
         public void processElement(@Element BigtableFailedDoc failedDoc,  OutputReceiver<RowMutation> out) {
-
-
-
             RowMutation rowMutation = RowMutation.create(tableId, failedDoc.getRowKey());
             rowMutation
                     .setCell("cf-meta", "payload", failedDoc.getPayload())
@@ -237,32 +234,32 @@ public class DataflowToBigtable {
         public void processElement(@Element KV<String, Iterable<KV<String, BigtableInventory>>> kv, MultiOutputReceiver out){
             String rowKey = kv.getKey();
             Iterable<KV<String, BigtableInventory>> messages = kv.getValue();
-            int totalCount = 0;
 
             for (KV<String, BigtableInventory> message : messages) {
+                int totalCount = 0;
                 BigtableInventory bigtableInventory = message.getValue();
                 Inventory inventory = bigtableInventory.getInventory();
-                long timestamp = Long.parseLong(message.getKey());
-                long reversedTimeStamp = Long.MAX_VALUE - timestamp;
-                String rowkeyStamped = rowKey + "#" + reversedTimeStamp;
+                String rowkeyStamped = bigtableInventory.getRowKeyStamped();
+                String rowKeyStart = bigtableInventory.getRowKeyStart();
+                String rowKeyEnd = bigtableInventory.getRowKeyEnd();
                 Filters.Filter filter = Filters.FILTERS.limit().cellsPerColumn(1);
+
+                // Insert current record into Bigtable
                 RowMutation rowMutation = RowMutation.create(tableId, rowkeyStamped);
                 if (inventory.countOverride != null) {
                     totalCount = Integer.parseInt(inventory.countOverride);
                     rowMutation.setCell("cf-meta", "count#override", String.valueOf(totalCount));
                 } else {
-                    Query query = Query.create(tableId).prefix(rowKey);
-                    ServerStream<Row> rows = dataClient.readRows(query);
+                    Query query = Query.create(tableId).range(rowkeyStamped, rowKeyEnd).filter(filter);
+                    ServerStream<Row> rows = dataClient.readRows(query); // All rows in range [currentRow, end)
                     for (Row row : rows) {
                         List<RowCell> cell = row.getCells("cf-meta", "BOH");
                         if (cell.size() != 0) {
                             totalCount = Integer.parseInt(cell.get(0).getValue().toStringUtf8());
-                            System.out.println("timeStamp ******************** " + cell.get(0).getTimestamp());
                         }
                         break;
                     }
                 }
-
                 if (inventory.adjustment != null) {
                     totalCount += Integer.parseInt(inventory.adjustment);
                     rowMutation.setCell("cf-meta", "adjustment", String.valueOf(inventory.adjustment));
@@ -270,19 +267,42 @@ public class DataflowToBigtable {
                 rowMutation
                         .setCell("cf-meta", "BOH", String.valueOf(totalCount))
                         .setCell("cf-meta", "payload", bigtableInventory.getPayload())
-                        .setCell("cf-meta", "createdDate", inventory.effectiveDate);
-
+                        .setCell("cf-meta", "effectiveDate", inventory.effectiveDate);
                 dataClient.mutateRow(rowMutation);
+
+                // Update all previous records until we see a countOverride
+                Query query = Query.create(tableId).range(rowKeyStart, rowkeyStamped).filter(filter);
+                ServerStream<Row> rowsToUpdate = dataClient.readRows(query);
+                List<Row> rowList = StreamSupport
+                        .stream(rowsToUpdate.spliterator(), false)
+                        .collect(Collectors.toList());
+                Collections.reverse(rowList);
+                for (Row row: rowList){
+                    List<RowCell> countOverrideCells = row.getCells("cf-meta", "count#override");
+                    if (countOverrideCells.size() != 0) {
+                        break;
+                    }
+                    else{
+                        List<RowCell> adjustmentCell = row.getCells("cf-meta", "adjustment");
+                        if (adjustmentCell.size() != 0) {
+                            int adjustment = Integer.parseInt(adjustmentCell.get(0).getValue().toStringUtf8());
+                            totalCount += adjustment;
+                            RowMutation rowToUpdate = RowMutation.create(tableId, row.getKey())
+                                    .setCell("cf-meta", "BOH", String.valueOf(totalCount));
+                            dataClient.mutateRow(rowToUpdate);
+                        }
+                    }
+                }
+
+                // Construct pubsub message
                 try {
-                    // Construct pubsub message
                     ObjectMapper mapper = new ObjectMapper();
                     InventorySum inventorySum = new InventorySum(inventory.version, inventory.retail, inventory.store, inventory.itemCode, inventory.UPC, inventory.documentId, String.valueOf(totalCount));
                     String json = mapper.writeValueAsString(inventorySum);
                     out.get(PUBSUB_OUT).output(json);
                 } catch (JsonProcessingException e) {
                     BigtableFailedDoc failedDocuments = new BigtableFailedDoc();
-//                    failedDocuments.setRowKey("PI#dataflow#ERROR#ApplicationError#" + reversedTimeStamp);
-                    failedDocuments.setTimestamp(timestamp);
+                    failedDocuments.setTimestamp(bigtableInventory.getMessageTimestamp());
                     failedDocuments.setErrorType("ApplicationError");
                     failedDocuments.setErroredRowKey(rowkeyStamped);
                     failedDocuments.setPayload(bigtableInventory.getPayload());
@@ -303,13 +323,16 @@ public class DataflowToBigtable {
             Inventory inventory = null;
             try {
                 inventory = mapper.readValue(payload, Inventory.class);
-                String rowKey = "dataflow#count#retail#" + inventory.retail + "#store#" + inventory.store + "#upc#" + inventory.UPC + "#ItemCode#" + inventory.itemCode;
+                long effectiveDateTs = inventory.getEffectiveDateMillis();
+                String rowKey = inventory.getRowKey();
                 BigtableInventory bigtableInventory = new BigtableInventory();
+                bigtableInventory.setMessageTimestamp(timestamp.getMillis());
+                bigtableInventory.setEffectiveDateTs(effectiveDateTs);
                 bigtableInventory.setPayload(payload);
                 bigtableInventory.setInventory(inventory);
                 System.out.println("rowKey ******************** " + rowKey);
                 out.get(TRANSFORM_OUT).output(KV.of(rowKey, KV.of(String.valueOf(timestamp.getMillis()), bigtableInventory)));
-            } catch (JsonProcessingException e) {
+            } catch (Exception e) {
                 BigtableFailedDoc failedDocuments = new BigtableFailedDoc();
 //                failedDocuments.setRowKey("PI#dataflow#ERROR#InputRequestError#" + reversedTimeStamp);
                 failedDocuments.setTimestamp(timestamp.getMillis());
