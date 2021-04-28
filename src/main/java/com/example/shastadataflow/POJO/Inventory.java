@@ -1,4 +1,4 @@
-package com.example.shastadataflow;
+package com.example.shastadataflow.POJO;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
@@ -12,10 +12,10 @@ import java.util.Date;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Inventory {
     public String version;
-    public String retail;
-    public String store;
+    public String org;
+    public String enterpriseUnit;
     public String itemCode;
-    public String UPC;
+    public String upc;
     public String documentName;
     public String documentId;
     public String documentType;
@@ -27,7 +27,7 @@ public class Inventory {
     public double basePrice;
 
     public String getRowKey(){
-        return "dataflow#count#retail#" + this.retail + "#store#" + this.store + "#upc#" + this.UPC + "#ItemCode#" + this.itemCode;
+        return "dataflow#count#org#" + this.org + "#enterpriseUnit#" + this.enterpriseUnit + "#upc#" + this.upc + "#itemCode#" + this.itemCode;
     }
 
     public long getEffectiveDateMillis() throws ParseException {

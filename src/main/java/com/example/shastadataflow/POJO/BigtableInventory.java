@@ -1,6 +1,6 @@
-package com.example.shastadataflow;
+package com.example.shastadataflow.POJO;
 
-import org.apache.avro.reflect.Nullable;
+import com.example.shastadataflow.POJO.Inventory;
 import org.apache.beam.sdk.coders.AvroCoder;
 import org.apache.beam.sdk.coders.DefaultCoder;
 
@@ -45,7 +45,14 @@ public class BigtableInventory {
 
     public String getRowKeyStamped(){
         long reversedEffectiveDateTs = Long.MAX_VALUE - this.effectiveDateTs;
-        return this.inventory.getRowKey() + "#" + "effectiveDate" + "#" + reversedEffectiveDateTs;
+        long reversedTimestamp = Long.MAX_VALUE - this.messageTimestamp;
+        return this.inventory.getRowKey() + "#effectiveDate#" + reversedEffectiveDateTs + "#timestamp#" + reversedTimestamp;
+    }
+
+    public String getRowKeyStampedInclusive(){
+        long reversedEffectiveDateTs = Long.MAX_VALUE - this.effectiveDateTs + 1;
+        long reversedTimestamp = Long.MAX_VALUE - this.messageTimestamp;
+        return this.inventory.getRowKey() + "#effectiveDate#" + reversedEffectiveDateTs + "#timestamp#" + reversedTimestamp;
     }
 
     public String getRowKeyStart(){

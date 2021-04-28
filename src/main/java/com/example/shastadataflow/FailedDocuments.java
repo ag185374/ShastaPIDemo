@@ -34,7 +34,6 @@ public class FailedDocuments {
         return this;
     }
 
-
     public FailedDocuments setStacktrace(String stacktrace) {
         this.stacktrace = stacktrace;
         return this;

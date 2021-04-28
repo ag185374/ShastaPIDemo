@@ -1,4 +1,4 @@
-package com.example.shastadataflow;
+package com.example.shastadataflow.POJO;
 
 import org.apache.avro.reflect.Nullable;
 import org.apache.beam.sdk.coders.AvroCoder;

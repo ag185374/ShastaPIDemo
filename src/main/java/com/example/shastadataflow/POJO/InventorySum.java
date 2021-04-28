@@ -1,4 +1,4 @@
-package com.example.shastadataflow;
+package com.example.shastadataflow.POJO;
 
 import com.fasterxml.jackson.annotation.JsonGetter;
 import lombok.Data;
@@ -7,18 +7,20 @@ import org.codehaus.jackson.annotate.JsonSetter;
 
 @Data
 public class InventorySum {
-    public InventorySum(String version, String retail, String store, String itemCode, String upc, String documentId, String totalCount){
+    public InventorySum(String timestamp, String version, String org, String enterpriseUnit, String itemCode, String upc, String documentId, String totalCount){
         this.version = version;
-        this.retail = retail;
-        this.store = store;
+        this.org = org;
+        this.enterpriseUnit = enterpriseUnit;
         this.itemCode = itemCode;
         this.upc = upc;
         this.documentId = documentId;
         this.BOH = totalCount;
+        this.timestamp = timestamp;
     }
+    public String timestamp;
     public String version;
-    public String retail;
-    public String store;
+    public String org;
+    public String enterpriseUnit;
     public String itemCode;
     @JsonProperty("BOH")
     public String BOH;
