@@ -1,10 +1,7 @@
 package com.example.shastadataflow.common;
 
 import avro.shaded.com.google.common.base.Throwables;
-import com.example.shastadataflow.POJO.BigtableFailedDoc;
-import com.example.shastadataflow.POJO.BigtableInventory;
-import com.example.shastadataflow.POJO.Inventory;
-import com.example.shastadataflow.POJO.InventorySum;
+import com.example.shastadataflow.POJO.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.api.gax.rpc.ServerStream;
@@ -16,6 +13,7 @@ import com.google.cloud.bigtable.data.v2.models.*;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.TupleTag;
+
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
@@ -78,65 +76,21 @@ public class BigtableOperation {
 
             //TODO: records with duplicate effectiveDate, but different timestamp needs to be considered(which BOH to use, which records to update)
             for (KV<String, BigtableInventory> message : messages) {
-                int totalCount = 0;
                 BigtableInventory bigtableInventory = message.getValue();
                 Inventory inventory = bigtableInventory.getInventory();
                 String rowkeyStamped = bigtableInventory.getRowKeyStamped();
                 String rowKeyStart = bigtableInventory.getRowKeyStart();
                 String rowKeyEnd = bigtableInventory.getRowKeyEnd();
 
-
                 // Insert current record into Bigtable
-                RowMutation rowMutation = RowMutation.create(tableId, rowkeyStamped);
-                if (inventory.countOverride != null) {
-                    totalCount = Integer.parseInt(inventory.countOverride);
-                    rowMutation.setCell("cf-meta", "count#override", String.valueOf(totalCount));
-                } else {
-                    Query query = Query.create(tableId).range(rowkeyStamped, rowKeyEnd).filter(filter);
-                    ServerStream<Row> rows = dataClient.readRows(query); // All rows in range [currentRow, end)
-                    for (Row row : rows) {
-                        List<RowCell> cell = row.getCells("cf-meta", "BOH");
-                        if (cell.size() != 0) {
-                            totalCount = Integer.parseInt(cell.get(0).getValue().toStringUtf8());
-                        }
-                        break;
-                    }
-                }
-                if (inventory.adjustment != null) {
-                    totalCount += Integer.parseInt(inventory.adjustment);
-                    rowMutation.setCell("cf-meta", "adjustment", String.valueOf(inventory.adjustment));
-                }
-                rowMutation
-                        .setCell("cf-meta", "BOH", String.valueOf(totalCount))
-                        .setCell("cf-meta", "payload", bigtableInventory.getPayload())
-                        .setCell("cf-meta", "effectiveDate", inventory.effectiveDate);
-                dataClient.mutateRow(rowMutation);
+                int totalCount = insertBOHRow(bigtableInventory, rowkeyStamped, rowKeyEnd, filter);
+                String familyRowKeyStamped = bigtableInventory.getFamilyRowKeyStamped();
+
+                insertFamilyIDRow(familyRowKeyStamped, inventory);
 
                 // Update all previous records until we see a countOverride
-                Query query = Query.create(tableId).range(rowKeyStart, rowkeyStamped).filter(filter);
-                ServerStream<Row> rowsToUpdate = dataClient.readRows(query);
-                List<Row> rowList = StreamSupport
-                        .stream(rowsToUpdate.spliterator(), false)
-                        .collect(Collectors.toList());
-                Collections.reverse(rowList);
-                boolean sendPubsubMessage = true;
-                for (Row row: rowList){
-                    List<RowCell> countOverrideCells = row.getCells("cf-meta", "count#override");
-                    if (countOverrideCells.size() != 0) {
-                        sendPubsubMessage = false;
-                        break;
-                    }
-                    else{
-                        List<RowCell> adjustmentCell = row.getCells("cf-meta", "adjustment");
-                        if (adjustmentCell.size() != 0) {
-                            int adjustment = Integer.parseInt(adjustmentCell.get(0).getValue().toStringUtf8());
-                            totalCount += adjustment;
-                            RowMutation rowToUpdate = RowMutation.create(tableId, row.getKey())
-                                    .setCell("cf-meta", "BOH", String.valueOf(totalCount));
-                            dataClient.mutateRow(rowToUpdate);
-                        }
-                    }
-                }
+                boolean sendPubsubMessage = updateBOH(rowKeyStart, rowkeyStamped, totalCount, filter);
+
 
                 if (sendPubsubMessage){
                     // Construct pubsub message if the latest BOH is updated with the payload came
@@ -146,10 +100,10 @@ public class BigtableOperation {
                         ServerStream<Row> firstRows = dataClient.readRows(queryFirstRow);
                         for (Row row: firstRows){
                             List<RowCell> firstRowpayloadCells = row.getCells("cf-meta", "payload");
-                            List<RowCell> firstRowpayBOHCells = row.getCells("cf-meta", "BOH");
-                            if (firstRowpayloadCells.size()!=0 && firstRowpayBOHCells.size()!=0){
+                            List<RowCell> firstRowBOHCells = row.getCells("cf-meta", "BOH");
+                            if (firstRowpayloadCells.size()!=0 && firstRowBOHCells.size()!=0){
                                 String firstRowPayload = firstRowpayloadCells.get(0).getValue().toStringUtf8();
-                                String firstRowBOH = firstRowpayBOHCells.get(0).getValue().toStringUtf8();
+                                String firstRowBOH = firstRowBOHCells.get(0).getValue().toStringUtf8();
                                 ObjectMapper mapper = new ObjectMapper();
                                 SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS");
                                 Date date = new Date();
@@ -172,6 +126,70 @@ public class BigtableOperation {
                     }
                 }
             }
+        }
+
+
+        private void insertFamilyIDRow(String familyRowKeyStamped, Inventory inventory){
+            RowMutation rowMutation = RowMutation.create(tableId, familyRowKeyStamped);
+            rowMutation.setCell("cf-family","upc", inventory.getUpc());
+            dataClient.mutateRow(rowMutation);
+        }
+
+        private int insertBOHRow(BigtableInventory bigtableInventory, String rowkeyStamped, String rowKeyEnd, Filters.Filter filter){
+            RowMutation rowMutation = RowMutation.create(tableId, rowkeyStamped);
+            Inventory inventory = bigtableInventory.getInventory();
+            int totalCount = 0;
+            if (inventory.countOverride != null) {
+                totalCount = Integer.parseInt(inventory.countOverride);
+                rowMutation.setCell("cf-meta", "count#override", String.valueOf(totalCount));
+            } else {
+                Query query = Query.create(tableId).range(rowkeyStamped, rowKeyEnd).filter(filter);
+                ServerStream<Row> rows = dataClient.readRows(query); // All rows in range [currentRow, end)
+                for (Row row : rows) {
+                    List<RowCell> cell = row.getCells("cf-meta", "BOH");
+                    if (cell.size() != 0) {
+                        totalCount = Integer.parseInt(cell.get(0).getValue().toStringUtf8());
+                    }
+                    break;
+                }
+            }
+            if (inventory.adjustment != null) {
+                totalCount += Integer.parseInt(inventory.adjustment);
+                rowMutation.setCell("cf-meta", "adjustment", String.valueOf(inventory.adjustment));
+            }
+            rowMutation
+                    .setCell("cf-meta", "BOH", String.valueOf(totalCount))
+                    .setCell("cf-meta", "payload", bigtableInventory.getPayload())
+                    .setCell("cf-meta", "effectiveDate", inventory.effectiveDate)
+                    .setCell("cf-meta", "familyId", inventory.familyId);
+            dataClient.mutateRow(rowMutation);
+            return totalCount;
+        }
+
+        private boolean updateBOH(String rowKeyStart, String rowkeyStamped, int totalCount, Filters.Filter filter){
+            Query query = Query.create(tableId).range(rowKeyStart, rowkeyStamped).filter(filter);
+            ServerStream<Row> rowsToUpdate = dataClient.readRows(query);
+            List<Row> rowList = StreamSupport
+                    .stream(rowsToUpdate.spliterator(), false)
+                    .collect(Collectors.toList());
+            Collections.reverse(rowList);
+            for (Row row: rowList){
+                List<RowCell> countOverrideCells = row.getCells("cf-meta", "count#override");
+                if (countOverrideCells.size() != 0) {
+                   return false;
+                }
+                else{
+                    List<RowCell> adjustmentCell = row.getCells("cf-meta", "adjustment");
+                    if (adjustmentCell.size() != 0) {
+                        int adjustment = Integer.parseInt(adjustmentCell.get(0).getValue().toStringUtf8());
+                        totalCount += adjustment;
+                        RowMutation rowToUpdate = RowMutation.create(tableId, row.getKey())
+                                .setCell("cf-meta", "BOH", String.valueOf(totalCount));
+                        dataClient.mutateRow(rowToUpdate);
+                    }
+                }
+            }
+            return true;
         }
     }
 }

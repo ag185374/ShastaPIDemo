@@ -55,6 +55,16 @@ public class BigtableInventory {
         return this.inventory.getRowKey() + "#effectiveDate#" + reversedEffectiveDateTs + "#timestamp#" + reversedTimestamp;
     }
 
+    public String getRowKeyWithEffectiveDate(){
+        long reversedEffectiveDateTs = Long.MAX_VALUE - this.effectiveDateTs;
+        return this.inventory.getRowKey() + "#effectiveDate#" + reversedEffectiveDateTs;
+    }
+
+    public String getFamilyRowKeyStamped(){
+        long reversedTimestamp = Long.MAX_VALUE - this.messageTimestamp;
+        return this.inventory.getFamilyRowKey() + "#timestamp#" + reversedTimestamp;
+    }
+
     public String getRowKeyStart(){
         return this.inventory.getRowKey() + "#effectiveDate#0";
     }

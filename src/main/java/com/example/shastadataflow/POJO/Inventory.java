@@ -16,6 +16,9 @@ public class Inventory {
     public String enterpriseUnit;
     public String itemCode;
     public String upc;
+    public String familyId;
+    public String packageSize;
+    public String qty;
     public String documentName;
     public String documentId;
     public String documentType;
@@ -28,6 +31,10 @@ public class Inventory {
 
     public String getRowKey(){
         return "dataflow#count#org#" + this.org + "#enterpriseUnit#" + this.enterpriseUnit + "#upc#" + this.upc + "#itemCode#" + this.itemCode;
+    }
+
+    public String getFamilyRowKey(){
+        return "dataflow#count#org#" + this.org + "#enterpriseUnit#" + this.enterpriseUnit + "#familyId#" + this.familyId + "#upc#" + this.upc + "#itemCode#" + this.itemCode;
     }
 
     public long getEffectiveDateMillis() throws ParseException {
