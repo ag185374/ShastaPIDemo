@@ -1,15 +1,12 @@
 package com.example.shastadataflow;
 
-import avro.shaded.com.google.common.base.Throwables;
 import com.example.shastadataflow.POJO.BigtableFailedDoc;
 import com.example.shastadataflow.POJO.BigtableInventory;
-import com.example.shastadataflow.POJO.Inventory;
-import com.example.shastadataflow.common.BigtableConverter.GroupIntoKV;
+import com.example.shastadataflow.common.BigtableConverter;
 import com.example.shastadataflow.common.BigtableConverter.FailedPubsubMessageToBigTableRowFn;
+import com.example.shastadataflow.common.BigtableConverter.ParseDocumentFn;
 import com.example.shastadataflow.common.BigtableConverter.WriteTableRowFn;
 import com.example.shastadataflow.common.BigtableOperation.PubsubToBigtable;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.api.services.pubsub.Pubsub;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.extensions.sorter.BufferedExternalSorter;
 import org.apache.beam.sdk.extensions.sorter.SortValues;
@@ -17,18 +14,13 @@ import org.apache.beam.sdk.io.gcp.pubsub.PubsubIO;
 import org.apache.beam.sdk.io.gcp.pubsub.PubsubMessage;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
-import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.GroupByKey;
 import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.windowing.FixedWindows;
 import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.values.*;
-import org.apache.hadoop.yarn.webapp.hamlet.Hamlet;
 import org.joda.time.Duration;
-import org.joda.time.Instant;
-
-import java.nio.charset.StandardCharsets;
 
 public class DataflowToBigtable {
 
@@ -78,7 +70,7 @@ public class DataflowToBigtable {
          */
         PCollectionTuple keyedPubsubMessage =
                 fixedWindowedMessages.apply("ParsePubsubMessage", ParDo
-                        .of(new GroupIntoKV().setSuccessTag(TRANSFORM_OUT).setFailureTag(TRANSFORM_FAILED))
+                        .of(new ParseDocumentFn().setSuccessTag(TRANSFORM_OUT).setFailureTag(TRANSFORM_FAILED))
                         .withOutputTags(TRANSFORM_OUT, TupleTagList.of(TRANSFORM_FAILED))
                 );
 

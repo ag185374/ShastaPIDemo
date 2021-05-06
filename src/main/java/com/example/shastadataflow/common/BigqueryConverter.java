@@ -1,7 +1,7 @@
 package com.example.shastadataflow.common;
 
 import avro.shaded.com.google.common.base.Throwables;
-import com.example.shastadataflow.FailedDocuments;
+import com.example.shastadataflow.POJO.BigqueryFailedDoc;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.services.bigquery.model.TableRow;
 import org.apache.beam.sdk.coders.Coder;
@@ -29,13 +29,13 @@ public class BigqueryConverter {
         /** The tag for the main output of the json transformation. */
         private TupleTag<TableRow> successTag;
 
-        public PubsubMessageToTableRow setFailureTag(TupleTag<FailedDocuments> failureTag) {
+        public PubsubMessageToTableRow setFailureTag(TupleTag<BigqueryFailedDoc> failureTag) {
             this.failureTag = failureTag;
             return this;
         }
 
         /** The tag for the dead-letter output of the json to table row transform. */
-        private TupleTag<FailedDocuments> failureTag;
+        private TupleTag<BigqueryFailedDoc> failureTag;
 
         public PubsubMessageToTableRow setSuccessTag(TupleTag<TableRow> successTag){
             this.successTag = successTag;
@@ -45,7 +45,7 @@ public class BigqueryConverter {
         @ProcessElement
         public void processElement(@Element PubsubMessage message, @Timestamp Instant ts, MultiOutputReceiver out){
             String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
-            FailedDocuments failedDocuments = new FailedDocuments();
+            BigqueryFailedDoc failedDocuments = new BigqueryFailedDoc();
             // Parse the JSON into a {TableRow} object.
             // try-with-resources
             try {
@@ -77,12 +77,12 @@ public class BigqueryConverter {
      * The {FailedPubsubMessageToTableRowFn} converts {PubsubMessage} objects which have
      * failed processing into {TableRow} objects which can be output to a dead-letter table.
      */
-    public static class FailedPubsubMessageToTableRowFn extends DoFn<FailedDocuments, TableRow> {
+    public static class FailedPubsubMessageToTableRowFn extends DoFn<BigqueryFailedDoc, TableRow> {
 
         private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
 
         @ProcessElement
-        public void processElement(@Element FailedDocuments failedDoc, @Timestamp Instant ts, OutputReceiver<TableRow> out) {
+        public void processElement(@Element BigqueryFailedDoc failedDoc, @Timestamp Instant ts, OutputReceiver<TableRow> out) {
 
             // Format the timestamp for insertion
             String timestamp = TIMESTAMP_FORMATTER.print(ts.toDateTime(DateTimeZone.UTC));
@@ -104,13 +104,13 @@ public class BigqueryConverter {
     }
 
 
-    public static FailedDocuments wrapBigQueryInsertError(BigQueryInsertError insertError) {
+    public static BigqueryFailedDoc wrapBigQueryInsertError(BigQueryInsertError insertError) {
         try {
 
             String rowPayload = JSON_FACTORY.toString(insertError.getRow());
             String errorMessage = JSON_FACTORY.toString(insertError.getError());
 
-            FailedDocuments faildDocument = new FailedDocuments();
+            BigqueryFailedDoc faildDocument = new BigqueryFailedDoc();
             faildDocument.setPayload(rowPayload);
             faildDocument.setErrorMessage(errorMessage);
             return faildDocument;

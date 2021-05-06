@@ -1,11 +1,11 @@
-package com.example.shastadataflow;
+package com.example.shastadataflow.POJO;
 
 import org.apache.avro.reflect.Nullable;
 import org.apache.beam.sdk.coders.AvroCoder;
 import org.apache.beam.sdk.coders.DefaultCoder;
 
 @DefaultCoder(AvroCoder.class)
-public class FailedDocuments {
+public class BigqueryFailedDoc {
 
     private String payload;
     @Nullable private String errorMessage;
@@ -25,16 +25,16 @@ public class FailedDocuments {
         return stacktrace;
     }
 
-    public FailedDocuments setPayload(String payload) {
+    public BigqueryFailedDoc setPayload(String payload) {
         this.payload = payload;
         return this;
     }
-    public FailedDocuments setErrorMessage(String errorMessage) {
+    public BigqueryFailedDoc setErrorMessage(String errorMessage) {
         this.errorMessage = errorMessage;
         return this;
     }
 
-    public FailedDocuments setStacktrace(String stacktrace) {
+    public BigqueryFailedDoc setStacktrace(String stacktrace) {
         this.stacktrace = stacktrace;
         return this;
     }

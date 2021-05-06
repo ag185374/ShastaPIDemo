@@ -13,6 +13,16 @@ public class BigtableFailedDoc {
     @Nullable private String errorMessage;
     @Nullable private String stacktrace;
 
+    public String getItemKey() {
+        return itemKey;
+    }
+
+    public void setItemKey(String itemKey) {
+        this.itemKey = itemKey;
+    }
+
+    @Nullable private String itemKey;
+
     public long getTimestamp() {
         return timestamp;
     }

@@ -15,25 +15,28 @@ import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.TupleTag;
 import org.joda.time.Instant;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 public class BigtableConverter {
 
-    public static class GroupIntoKV extends DoFn<PubsubMessage, KV<String, KV<String, BigtableInventory>>> {
+    private static final Logger LOG = LoggerFactory.getLogger(BigtableConverter.class);
+
+    public static class ParseDocumentFn extends DoFn<PubsubMessage, KV<String, KV<String, BigtableInventory>>> {
         /** The tag for the main output of the json transformation. */
         private TupleTag<KV<String, KV<String, BigtableInventory>>> successTag;
 
         /** The tag for the dead-letter output of the json to table row transform. */
         private TupleTag<BigtableFailedDoc> failureTag;
 
-        public GroupIntoKV setSuccessTag(TupleTag<KV<String, KV<String, BigtableInventory>>> successTag) {
+        public ParseDocumentFn setSuccessTag(TupleTag<KV<String, KV<String, BigtableInventory>>> successTag) {
             this.successTag = successTag;
             return this;
         }
 
-        public GroupIntoKV setFailureTag(TupleTag<BigtableFailedDoc> failureTag) {
+        public ParseDocumentFn setFailureTag(TupleTag<BigtableFailedDoc> failureTag) {
             this.failureTag = failureTag;
             return this;
         }
@@ -52,17 +55,24 @@ public class BigtableConverter {
                 bigtableInventory.setEffectiveDateTs(effectiveDateTs);
                 bigtableInventory.setPayload(payload);
                 bigtableInventory.setInventory(inventory);
-                out.get(successTag).output(KV.of(rowKey, KV.of(String.valueOf(timestamp.getMillis()), bigtableInventory)));
-                System.out.println("rowKey ******************** " + rowKey + "#" + inventory.getEffectiveDate());
+                if (inventory.adjustment != null || inventory.countOverride != null || inventory.packageLevel != null && inventory.packageCase != null){
+                    out.get(successTag).output(KV.of(rowKey, KV.of(String.valueOf(timestamp.getMillis()), bigtableInventory)));
+                    LOG.info("Got Document with rowKey ******************** " + rowKey + "#" + inventory.getEffectiveDate());
+                }
+                else{
+                    throw new Exception("Field countOverride, adjustment, or packageLevel and packageSize missing");
+                }
             } catch (Exception e) {
                 BigtableFailedDoc failedDocuments = new BigtableFailedDoc();
                 failedDocuments.setTimestamp(timestamp.getMillis());
                 failedDocuments.setErrorType("InputRequestError");
                 failedDocuments.setPayload(payload);
+                if (inventory!= null){
+                    failedDocuments.setItemKey(inventory.getRowKey());
+                }
                 failedDocuments.setErrorMessage(e.getMessage());
                 failedDocuments.setStacktrace(Throwables.getStackTraceAsString(e));
                 out.get(failureTag).output(failedDocuments);
-                System.out.println("Document failed parsing");
             }
         }
     }
@@ -74,14 +84,22 @@ public class BigtableConverter {
         @ProcessElement
         public void processElement(@Element BigtableFailedDoc failedDoc,  OutputReceiver<RowMutation> out) {
             RowMutation rowMutation = RowMutation.create(tableId, failedDoc.getRowKey());
-            rowMutation
-                    .setCell("cf-meta", "payload", failedDoc.getPayload())
-                    .setCell("cf-meta", "errorMessage", failedDoc.getErrorMessage())
-                    .setCell("cf-meta", "stacktrace", failedDoc.getStacktrace());
+            rowMutation.setCell("cf-meta", "payload", failedDoc.getPayload());
+            if(failedDoc.getErrorMessage()!= null){
+                rowMutation.setCell("cf-meta", "errorMessage", failedDoc.getErrorMessage());
+            }
+            if(failedDoc.getStacktrace()!=null){
+                rowMutation.setCell("cf-meta", "stacktrace", failedDoc.getStacktrace());
+            }
             if (failedDoc.getErroredRowKey() != null){
                 rowMutation.setCell("cf-meta", "erroredRowKey", failedDoc.getErroredRowKey());
             }
             out.output(rowMutation);
+            String logMessage = "Document failed processing, rowKey: " + failedDoc.getRowKey() + ", error message: " + failedDoc.getErrorMessage();
+            if (failedDoc.getItemKey() != null){
+                logMessage += " item key: " + failedDoc.getItemKey();
+            }
+            LOG.info(logMessage);
         }
     }
 
@@ -89,7 +107,7 @@ public class BigtableConverter {
         private static BigtableDataClient dataClient;
         private static BigtableTableAdminClient adminClient;
         private static String bigtableProjectId = "ret-shasta-cug01-dev";
-        private static String bigtableInstanceId = "pi-bigtable";
+        private static String bigtableInstanceId = "shasta-inventory-pi-test";
 
         @Setup
         public void initializeBigtableConnection() throws IOException {
@@ -110,6 +128,11 @@ public class BigtableConverter {
             adminClient = BigtableTableAdminClient.create(adminSettings);
         }
 
+        @Teardown
+        public void shutdownClients(){
+            dataClient.close();
+            adminClient.close();
+        }
 
         @ProcessElement
         public void processElement(@Element RowMutation rowMutation){

@@ -7,7 +7,7 @@ import org.codehaus.jackson.annotate.JsonSetter;
 
 @Data
 public class InventorySum {
-    public InventorySum(String timestamp, String version, String org, String enterpriseUnit, String itemCode, String upc, String documentId, String totalCount){
+    public InventorySum(String timestamp, String version, String org, String enterpriseUnit, String itemCode, String upc, String documentId, int totalCount, String familyId){
         this.version = version;
         this.org = org;
         this.enterpriseUnit = enterpriseUnit;
@@ -16,24 +16,30 @@ public class InventorySum {
         this.documentId = documentId;
         this.BOH = totalCount;
         this.timestamp = timestamp;
+        this.familyId = familyId;
     }
     public String timestamp;
     public String version;
     public String org;
     public String enterpriseUnit;
     public String itemCode;
-    @JsonProperty("BOH")
-    public String BOH;
     public String upc;
+    @JsonProperty("BOH")
+    public Integer BOH;
     public String documentId;
+    public String familyId;
+    public Integer adjustment;
+    public Integer countOverride;
+    public Integer packageOverride;
+
 
     @JsonGetter("BOH")
-    public String getBOH() {
+    public Integer getBOH() {
         return BOH;
     }
 
     @JsonSetter("BOH")
-    public void setBOH(String BOH) {
+    public void setBOH(int BOH) {
         this.BOH = BOH;
     }
 }

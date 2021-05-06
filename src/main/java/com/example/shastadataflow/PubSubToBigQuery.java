@@ -1,5 +1,6 @@
 package com.example.shastadataflow;
 
+import com.example.shastadataflow.POJO.BigqueryFailedDoc;
 import com.example.shastadataflow.common.BigqueryConverter.FailedPubsubMessageToTableRowFn;
 import com.example.shastadataflow.common.BigqueryConverter.PubsubMessageToTableRow;
 import com.google.api.services.bigquery.model.TableReference;
@@ -28,7 +29,7 @@ public class PubSubToBigQuery {
     public static final TupleTag<TableRow> TRANSFORM_OUT = new TupleTag<TableRow>() {};
 
     /** The tag for the dead-letter output of the json to table row transform. */
-    public static final TupleTag<FailedDocuments> TRANSFORM_FAILED =new TupleTag<FailedDocuments>() {};
+    public static final TupleTag<BigqueryFailedDoc> TRANSFORM_FAILED =new TupleTag<BigqueryFailedDoc>() {};
 
     private static String inputSubscription = "projects/ret-shasta-cug01-dev/subscriptions/Shasta-PI-outbound-sub";
 
@@ -84,10 +85,10 @@ public class PubSubToBigQuery {
          * Step 3 Contd.
          * Elements that failed inserts into BigQuery are extracted and converted to FailedDocuments
          */
-        PCollection<FailedDocuments> failedInserts = writeResult
+        PCollection<BigqueryFailedDoc> failedInserts = writeResult
                         .getFailedInsertsWithErr()
                         .apply("WrapInsertionErrors",
-                                MapElements.into(TypeDescriptor.of(FailedDocuments.class))
+                                MapElements.into(TypeDescriptor.of(BigqueryFailedDoc.class))
                                         .via((BigQueryInsertError e) -> wrapBigQueryInsertError(e)));
 
 
@@ -115,14 +116,14 @@ public class PubSubToBigQuery {
      * enriched with the timestamp of that record and the details of the error including an error
      * message and stacktrace for debugging.
      */
-    public static class WritePubsubMessageErrors extends PTransform<PCollection<FailedDocuments>, WriteResult> {
+    public static class WritePubsubMessageErrors extends PTransform<PCollection<BigqueryFailedDoc>, WriteResult> {
         private final TableReference tableSpec = new TableReference()
                         .setProjectId("ret-shasta-cug01-dev")
                         .setDatasetId("ItemDocuments")
                         .setTableId("itemBOH_error_records");
 
         @Override
-        public WriteResult expand(PCollection<FailedDocuments> failedRecords) {
+        public WriteResult expand(PCollection<BigqueryFailedDoc> failedRecords) {
 
             return failedRecords
                     .apply("FailedRecordToTableRow", ParDo.of(new FailedPubsubMessageToTableRowFn()))

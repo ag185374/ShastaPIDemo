@@ -13,6 +13,8 @@ import com.google.cloud.bigtable.data.v2.models.*;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.TupleTag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 import java.io.IOException;
@@ -24,12 +26,16 @@ import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 public class BigtableOperation {
+
+    private static final Logger LOG = LoggerFactory.getLogger(BigtableOperation.class);
+
+
     public static class PubsubToBigtable extends DoFn<KV<String, Iterable<KV<String, BigtableInventory>>>, String> {
         private static BigtableDataClient dataClient;
         private static BigtableTableAdminClient adminClient;
         private static String tableId = "pi-dataflow-inventory";
         private static String bigtableProjectId = "ret-shasta-cug01-dev";
-        private static String bigtableInstanceId = "pi-bigtable";
+        private static String bigtableInstanceId = "shasta-inventory-pi-test";
 
         /** The tag for the main output of InventorySum to json transform. */
         private TupleTag<String> successTag;
@@ -79,14 +85,30 @@ public class BigtableOperation {
                 BigtableInventory bigtableInventory = message.getValue();
                 Inventory inventory = bigtableInventory.getInventory();
                 String rowkeyStamped = bigtableInventory.getRowKeyStamped();
+                String rowKeyWithEffectiveDate = bigtableInventory.getRowKeyWithEffectiveDate();
                 String rowKeyStart = bigtableInventory.getRowKeyStart();
                 String rowKeyEnd = bigtableInventory.getRowKeyEnd();
 
+                // check if rowkeyWithEffectiveDate exists in the bigtable
+                if(rowPrefixExist(rowKeyWithEffectiveDate)){
+                    BigtableFailedDoc failedDocuments = new BigtableFailedDoc();
+                    failedDocuments.setTimestamp(bigtableInventory.getMessageTimestamp());
+                    failedDocuments.setErrorType("InputRequestError");
+                    failedDocuments.setPayload(bigtableInventory.getPayload());
+                    failedDocuments.setErrorMessage("duplicate Effective Date found");
+                    failedDocuments.setItemKey(inventory.getRowKey());
+                    out.get(failureTag).output(failedDocuments);
+                    continue;
+                }
+
                 // Insert current record into Bigtable
                 int totalCount = insertBOHRow(bigtableInventory, rowkeyStamped, rowKeyEnd, filter);
-                String familyRowKeyStamped = bigtableInventory.getFamilyRowKeyStamped();
+                String familyRowKey = inventory.getFamilyRowKey();
 
-                insertFamilyIDRow(familyRowKeyStamped, inventory);
+                if(!rowPrefixExist(familyRowKey)){
+                    String familyRowKeyStamped = bigtableInventory.getFamilyRowKeyStamped();
+                    insertFamilyIDRow(familyRowKeyStamped, inventory);
+                }
 
                 // Update all previous records until we see a countOverride
                 boolean sendPubsubMessage = updateBOH(rowKeyStart, rowkeyStamped, totalCount, filter);
@@ -103,12 +125,25 @@ public class BigtableOperation {
                             List<RowCell> firstRowBOHCells = row.getCells("cf-meta", "BOH");
                             if (firstRowpayloadCells.size()!=0 && firstRowBOHCells.size()!=0){
                                 String firstRowPayload = firstRowpayloadCells.get(0).getValue().toStringUtf8();
-                                String firstRowBOH = firstRowBOHCells.get(0).getValue().toStringUtf8();
+                                int firstRowBOH = Integer.parseInt(firstRowBOHCells.get(0).getValue().toStringUtf8());
                                 ObjectMapper mapper = new ObjectMapper();
                                 SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS");
                                 Date date = new Date();
                                 Inventory firstInventory = mapper.readValue(firstRowPayload, Inventory.class);
-                                InventorySum inventorySum = new InventorySum(formatter.format(date), firstInventory.version, firstInventory.org, firstInventory.enterpriseUnit, firstInventory.itemCode, firstInventory.upc, firstInventory.documentId, firstRowBOH);
+                                InventorySum inventorySum = new InventorySum(formatter.format(date), firstInventory.version, firstInventory.org,
+                                        firstInventory.enterpriseUnit, firstInventory.itemCode, firstInventory.upc,
+                                        firstInventory.documentId, firstRowBOH, firstInventory.familyId);
+                                if (inventory.packageCase != null && inventory.packageLevel != null){
+                                    inventorySum.setPackageOverride(inventory.packageCase * inventory.packageLevel);
+                                }
+                                else {
+                                    if (inventory.countOverride != null){
+                                        inventorySum.setCountOverride(inventory.countOverride);
+                                    }
+                                    if (inventory.adjustment != null){
+                                        inventorySum.setAdjustment(inventory.adjustment);
+                                    }
+                                }
                                 String json = mapper.writeValueAsString(inventorySum);
                                 out.get(successTag).output(json);
                             }
@@ -120,6 +155,7 @@ public class BigtableOperation {
                         failedDocuments.setErrorType("ApplicationError");
                         failedDocuments.setErroredRowKey(rowkeyStamped);
                         failedDocuments.setPayload(bigtableInventory.getPayload());
+                        failedDocuments.setItemKey(inventory.getRowKey());
                         failedDocuments.setErrorMessage(e.getMessage());
                         failedDocuments.setStacktrace(Throwables.getStackTraceAsString(e));
                         out.get(failureTag).output(failedDocuments);
@@ -128,6 +164,12 @@ public class BigtableOperation {
             }
         }
 
+        private boolean rowPrefixExist(String prefix){
+            Query query = Query.create(tableId).prefix(prefix);
+            ServerStream<Row> rows = dataClient.readRows(query);
+            if (rows.iterator().hasNext()) return true;
+            else return false;
+        }
 
         private void insertFamilyIDRow(String familyRowKeyStamped, Inventory inventory){
             RowMutation rowMutation = RowMutation.create(tableId, familyRowKeyStamped);
@@ -139,23 +181,29 @@ public class BigtableOperation {
             RowMutation rowMutation = RowMutation.create(tableId, rowkeyStamped);
             Inventory inventory = bigtableInventory.getInventory();
             int totalCount = 0;
-            if (inventory.countOverride != null) {
-                totalCount = Integer.parseInt(inventory.countOverride);
-                rowMutation.setCell("cf-meta", "count#override", String.valueOf(totalCount));
-            } else {
-                Query query = Query.create(tableId).range(rowkeyStamped, rowKeyEnd).filter(filter);
-                ServerStream<Row> rows = dataClient.readRows(query); // All rows in range [currentRow, end)
-                for (Row row : rows) {
-                    List<RowCell> cell = row.getCells("cf-meta", "BOH");
-                    if (cell.size() != 0) {
-                        totalCount = Integer.parseInt(cell.get(0).getValue().toStringUtf8());
-                    }
-                    break;
-                }
+            if (inventory.packageCase!=null && inventory.packageLevel != null){
+                totalCount = inventory.packageCase * inventory.packageLevel;
+                rowMutation.setCell("cf-meta", "package#override", String.valueOf(totalCount));
             }
-            if (inventory.adjustment != null) {
-                totalCount += Integer.parseInt(inventory.adjustment);
-                rowMutation.setCell("cf-meta", "adjustment", String.valueOf(inventory.adjustment));
+            else{
+                if (inventory.countOverride != null) {
+                    totalCount = inventory.countOverride;
+                    rowMutation.setCell("cf-meta", "count#override", String.valueOf(totalCount));
+                } else {
+                    Query query = Query.create(tableId).range(rowkeyStamped, rowKeyEnd).filter(filter);
+                    ServerStream<Row> rows = dataClient.readRows(query); // All rows in range [currentRow, end)
+                    for (Row row : rows) {
+                        List<RowCell> cell = row.getCells("cf-meta", "BOH");
+                        if (cell.size() != 0) {
+                            totalCount = Integer.parseInt(cell.get(0).getValue().toStringUtf8());
+                        }
+                        break;
+                    }
+                }
+                if (inventory.adjustment != null) {
+                    totalCount += inventory.adjustment;
+                    rowMutation.setCell("cf-meta", "adjustment", String.valueOf(inventory.adjustment));
+                }
             }
             rowMutation
                     .setCell("cf-meta", "BOH", String.valueOf(totalCount))
