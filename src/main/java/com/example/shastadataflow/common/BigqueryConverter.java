@@ -15,6 +15,8 @@ import org.joda.time.DateTimeZone;
 import org.joda.time.Instant;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -24,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 public class BigqueryConverter {
 
     private static final JsonFactory JSON_FACTORY = Transport.getJsonFactory();
+    private static final Logger LOG = LoggerFactory.getLogger(BigqueryConverter.class);
 
     public static class PubsubMessageToTableRow extends DoFn<PubsubMessage, TableRow> {
         /** The tag for the main output of the json transformation. */
@@ -50,13 +53,12 @@ public class BigqueryConverter {
             // try-with-resources
             try {
                 TableRow row = convertJsonToTableRow(payload);
-                System.out.println("newBOH ******************** " + row.toString());
+                LOG.info("newBOH ******************** " + row.toString());
                 out.get(successTag).output(row);
             } catch (Exception e) {
                 failedDocuments.setPayload(payload);
                 failedDocuments.setErrorMessage(e.getMessage());
                 failedDocuments.setStacktrace(Throwables.getStackTraceAsString(e));
-                System.out.println("Document failed parsing");
                 out.get(failureTag).output(failedDocuments);
             }
         }
@@ -98,7 +100,7 @@ public class BigqueryConverter {
             if (failedDoc.getPayload() != null) {
                 failedRow.set("payload", failedDoc.getPayload());
             }
-
+            LOG.info("One document failed processing");
             out.output(failedRow);
         }
     }
