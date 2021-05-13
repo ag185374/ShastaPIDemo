@@ -107,7 +107,7 @@ public class BigtableConverter {
         private static BigtableDataClient dataClient;
         private static BigtableTableAdminClient adminClient;
         private static String bigtableProjectId = "ret-shasta-cug01-dev";
-        private static String bigtableInstanceId = "shasta-inventory-pi-test";
+        private static String bigtableInstanceId = "shasta-inventory-test";
 
         @Setup
         public void initializeBigtableConnection() throws IOException {

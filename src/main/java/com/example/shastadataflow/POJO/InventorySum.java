@@ -7,7 +7,7 @@ import org.codehaus.jackson.annotate.JsonSetter;
 
 @Data
 public class InventorySum {
-    public InventorySum(String timestamp, String version, String org, String enterpriseUnit, String itemCode, String upc, String documentId, int totalCount, String familyId){
+    public InventorySum(String timestamp, String version, String org, String enterpriseUnit, String itemCode, String upc, String documentId, int totalCount, String familyId, String effectiveDate){
         this.version = version;
         this.org = org;
         this.enterpriseUnit = enterpriseUnit;
@@ -17,6 +17,8 @@ public class InventorySum {
         this.BOH = totalCount;
         this.timestamp = timestamp;
         this.familyId = familyId;
+        this.effectiveDate = effectiveDate;
+
     }
     public String timestamp;
     public String version;
@@ -31,6 +33,7 @@ public class InventorySum {
     public Integer adjustment;
     public Integer countOverride;
     public Integer packageOverride;
+    public String effectiveDate;
 
 
     @JsonGetter("BOH")

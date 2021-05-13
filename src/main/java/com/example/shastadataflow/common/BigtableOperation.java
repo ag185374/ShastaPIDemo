@@ -35,7 +35,7 @@ public class BigtableOperation {
         private static BigtableTableAdminClient adminClient;
         private static String tableId = "pi-dataflow-inventory";
         private static String bigtableProjectId = "ret-shasta-cug01-dev";
-        private static String bigtableInstanceId = "shasta-inventory-pi-test";
+        private static String bigtableInstanceId = "shasta-inventory-test";
 
         /** The tag for the main output of InventorySum to json transform. */
         private TupleTag<String> successTag;
@@ -132,7 +132,7 @@ public class BigtableOperation {
                                 Inventory firstInventory = mapper.readValue(firstRowPayload, Inventory.class);
                                 InventorySum inventorySum = new InventorySum(formatter.format(date), firstInventory.version, firstInventory.org,
                                         firstInventory.enterpriseUnit, firstInventory.itemCode, firstInventory.upc,
-                                        firstInventory.documentId, firstRowBOH, firstInventory.familyId);
+                                        firstInventory.documentId, firstRowBOH, firstInventory.familyId, firstInventory.effectiveDate);
                                 if (inventory.packageCase != null && inventory.packageLevel != null){
                                     inventorySum.setPackageOverride(inventory.packageCase * inventory.packageLevel);
                                 }
